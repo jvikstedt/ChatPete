@@ -1,4 +1,5 @@
 use std::env;
+use std::sync::Mutex;
 
 use clap::Parser;
 use discord::{Discord, DiscordHandler};
@@ -14,6 +15,9 @@ mod discord;
 enum Commands {
     Chat {
         message: String,
+    },
+    Init {
+        description: String,
     }
 }
 
@@ -29,12 +33,14 @@ async fn main() {
 
 struct Handler {
     client: Client,
+    description: Mutex<String>,
 }
 
 impl Handler {
     pub fn new(api_key: &str) -> Self {
         Self {
             client: Client::new(api_key.to_string()),
+            description: Mutex::new("You are a funny bot in discord channel".to_string()),
         }
     }
 }
@@ -57,7 +63,7 @@ impl DiscordHandler for Handler {
                     vec![
                         chat_completion::ChatCompletionMessage {
                             role: chat_completion::MessageRole::system,
-                            content: chat_completion::Content::Text("You are a funny bot in discord channel".into()),
+                            content: chat_completion::Content::Text(self.description.lock().unwrap().clone()),
                             name: Some("ChatPete".into()),
                         },
                             chat_completion::ChatCompletionMessage {
@@ -71,6 +77,10 @@ impl DiscordHandler for Handler {
                 let result = self.client.chat_completion(req)?;
                 let content = result.choices[0].message.content.clone();
                 msg.channel_id.say(&ctx.http, content.unwrap()).await?;
+            },
+            Commands::Init { description } => {
+                *self.description.lock().unwrap() = description;
+                msg.channel_id.say(&ctx.http, "Ok.").await?;
             }
         }
 
