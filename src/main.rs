@@ -69,7 +69,7 @@ impl DiscordHandler for Handler {
                             chat_completion::ChatCompletionMessage {
                             role: chat_completion::MessageRole::user,
                             content: chat_completion::Content::Text(message.clone()),
-                            name: None,
+                            name: msg.author.global_name.clone(),
                         }
                     ],
                 );
