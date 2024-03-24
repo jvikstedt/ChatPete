@@ -9,6 +9,8 @@ use openai_api_rs::v1::common::GPT4;
 use serenity::all::{Context, Message};
 use serenity::async_trait;
 use anyhow::Result;
+use unidecode::unidecode;
+
 mod discord;
 
 #[derive(Parser)]
@@ -56,6 +58,8 @@ impl DiscordHandler for Handler {
 
         let command = Commands::try_parse_from(args)?;
 
+        let author: Option<String> = msg.author.global_name.clone().map_or_else(|| None, |v| Some(unidecode(&v).chars().filter(|c| c.is_alphabetic()).collect()));
+
         match command {
             Commands::Chat{ message } => {
                 let req = ChatCompletionRequest::new(
@@ -69,7 +73,7 @@ impl DiscordHandler for Handler {
                             chat_completion::ChatCompletionMessage {
                             role: chat_completion::MessageRole::user,
                             content: chat_completion::Content::Text(message.clone()),
-                            name: msg.author.global_name.clone(),
+                            name: author,
                         }
                     ],
                 );
