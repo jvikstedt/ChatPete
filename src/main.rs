@@ -1,7 +1,7 @@
 use std::env;
 use std::sync::Mutex;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use discord::{Discord, DiscordHandler};
 use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
@@ -24,8 +24,77 @@ enum Commands {
     },
     Image {
         description: String,
+
+        #[clap(long = "model")]
+        model: Option<ImageModel>,
+
+        // #[clap(long = "quality")]
+        // quality: Option<ImageQuality>,
+
+        // #[clap(long = "style")]
+        // style: Option<ImageStyle>,
     }
 }
+
+#[derive(ValueEnum, Debug, Clone)]
+enum ImageModel {
+    Dalle3,
+    Dalle2,
+}
+
+impl ImageModel {
+    fn api_value(&self) -> String {
+        match self {
+            ImageModel::Dalle3 => {
+                String::from("dall-e-3")
+            },
+            ImageModel::Dalle2 => {
+                String::from("dall-e-2")
+            }
+        }
+    }
+}
+
+// TODO:
+// openai-api-rs library not yet supporting quality or style changes
+
+// #[derive(ValueEnum, Debug, Clone)]
+// enum ImageQuality {
+//     Standard,
+//     HD,
+// }
+//
+// impl ImageQuality {
+//     fn api_value(&self) -> String {
+//         match self {
+//             ImageQuality::Standard => {
+//                 String::from("standard")
+//             },
+//             ImageQuality::HD => {
+//                 String::from("hd")
+//             }
+//         }
+//     }
+// }
+//
+// #[derive(ValueEnum, Debug, Clone)]
+// enum ImageStyle {
+//     Vivid,
+//     Natural,
+// }
+//
+// impl ImageStyle {
+//     fn api_value(&self) -> String {
+//         match self {
+//             ImageStyle::Vivid => {
+//                 String::from("vivid")
+//             },
+//             ImageStyle::Natural => {
+//                 String::from("natural")
+//             }
+//         }
+//     }
+// }
 
 #[tokio::main]
 async fn main() {
@@ -90,8 +159,12 @@ impl DiscordHandler for Handler {
                 *self.description.lock().unwrap() = description;
                 msg.channel_id.say(&ctx.http, "Ok.").await?;
             },
-            Commands::Image { description } => {
-                let req = ImageGenerationRequest::new(description.clone()).model("dall-e-3".into());
+            Commands::Image { description, model } => {
+                let model_val = model.unwrap_or(ImageModel::Dalle2).api_value();
+                // let quality_val = quality.unwrap_or(ImageQuality::Standard).api_value();
+                // let style_val = style.unwrap_or(ImageStyle::Vivid).api_value();
+
+                let req = ImageGenerationRequest::new(description.clone()).model(model_val.clone());
 
                 let result = self.client.image_generation(req)?;
 
@@ -100,7 +173,7 @@ impl DiscordHandler for Handler {
                 let image_bytes = reqwest::get(image_url).await?.bytes().await?;
 
                 let attachment = CreateAttachment::bytes(image_bytes, "generated_image.png");
-                let builder = CreateMessage::new().content("Generated file:");
+                let builder = CreateMessage::new().content(format!("Generated image ({})", &model_val));
 
                 msg.channel_id.send_files(&ctx.http, [attachment], builder).await?;
             }
