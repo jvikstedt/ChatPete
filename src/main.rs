@@ -6,7 +6,8 @@ use discord::{Discord, DiscordHandler};
 use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::GPT4;
-use serenity::all::{Context, Message};
+use openai_api_rs::v1::image::ImageGenerationRequest;
+use serenity::all::{Context, CreateAttachment, CreateMessage, Message};
 use serenity::async_trait;
 use anyhow::Result;
 use unidecode::unidecode;
@@ -19,6 +20,9 @@ enum Commands {
         message: String,
     },
     Init {
+        description: String,
+    },
+    Image {
         description: String,
     }
 }
@@ -85,6 +89,20 @@ impl DiscordHandler for Handler {
             Commands::Init { description } => {
                 *self.description.lock().unwrap() = description;
                 msg.channel_id.say(&ctx.http, "Ok.").await?;
+            },
+            Commands::Image { description } => {
+                let req = ImageGenerationRequest::new(description.clone()).model("dall-e-3".into());
+
+                let result = self.client.image_generation(req)?;
+
+                let image_url = result.data[0].url.clone();
+
+                let image_bytes = reqwest::get(image_url).await?.bytes().await?;
+
+                let attachment = CreateAttachment::bytes(image_bytes, "generated_image.png");
+                let builder = CreateMessage::new().content("Generated file:");
+
+                msg.channel_id.send_files(&ctx.http, [attachment], builder).await?;
             }
         }
 
