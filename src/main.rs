@@ -1,6 +1,7 @@
 use std::env;
 use std::sync::Mutex;
 
+use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use discord::{Discord, DiscordHandler};
 use openai_api_rs::v1::api::Client;
@@ -9,7 +10,6 @@ use openai_api_rs::v1::common::GPT4;
 use openai_api_rs::v1::image::ImageGenerationRequest;
 use serenity::all::{Context, CreateAttachment, CreateMessage, Message};
 use serenity::async_trait;
-use anyhow::Result;
 use unidecode::unidecode;
 
 mod discord;
@@ -27,13 +27,12 @@ enum Commands {
 
         #[clap(long = "model")]
         model: Option<ImageModel>,
-
         // #[clap(long = "quality")]
         // quality: Option<ImageQuality>,
 
         // #[clap(long = "style")]
         // style: Option<ImageStyle>,
-    }
+    },
 }
 
 #[derive(ValueEnum, Debug, Clone)]
@@ -45,12 +44,8 @@ enum ImageModel {
 impl ImageModel {
     fn api_value(&self) -> String {
         match self {
-            ImageModel::Dalle3 => {
-                String::from("dall-e-3")
-            },
-            ImageModel::Dalle2 => {
-                String::from("dall-e-2")
-            }
+            ImageModel::Dalle3 => String::from("dall-e-3"),
+            ImageModel::Dalle2 => String::from("dall-e-2"),
         }
     }
 }
@@ -118,6 +113,37 @@ impl Handler {
             description: Mutex::new("You are a funny bot in discord channel".to_string()),
         }
     }
+
+    async fn handle_chat_command(
+        &self,
+        ctx: &Context,
+        msg: &Message,
+        message: &str,
+        author: Option<String>,
+    ) -> Result<()> {
+        let req = ChatCompletionRequest::new(
+            GPT4.to_string(),
+            vec![
+                chat_completion::ChatCompletionMessage {
+                    role: chat_completion::MessageRole::system,
+                    content: chat_completion::Content::Text(
+                        self.description.lock().unwrap().clone(),
+                    ),
+                    name: Some("ChatPete".into()),
+                },
+                chat_completion::ChatCompletionMessage {
+                    role: chat_completion::MessageRole::user,
+                    content: chat_completion::Content::Text(message.to_string()),
+                    name: author,
+                },
+            ],
+        );
+
+        let result = self.client.chat_completion(req)?;
+        let content = result.choices[0].message.content.clone();
+        msg.channel_id.say(&ctx.http, content.unwrap()).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -129,37 +155,38 @@ impl DiscordHandler for Handler {
         let args = shlex::split(&msg.content).unwrap();
         println!("{:?}", args);
 
-        let command = Commands::try_parse_from(args)?;
+        let command = Commands::try_parse_from(&args);
 
-        let author: Option<String> = msg.author.global_name.clone().map_or_else(|| None, |v| Some(unidecode(&v).chars().filter(|c| c.is_alphabetic()).collect()));
+        let author: Option<String> = msg.author.global_name.clone().map_or_else(
+            || None,
+            |v| {
+                Some(
+                    unidecode(&v)
+                        .chars()
+                        .filter(|c| c.is_alphabetic())
+                        .collect(),
+                )
+            },
+        );
 
         match command {
-            Commands::Chat{ message } => {
-                let req = ChatCompletionRequest::new(
-                    GPT4.to_string(),
-                    vec![
-                        chat_completion::ChatCompletionMessage {
-                            role: chat_completion::MessageRole::system,
-                            content: chat_completion::Content::Text(self.description.lock().unwrap().clone()),
-                            name: Some("ChatPete".into()),
-                        },
-                            chat_completion::ChatCompletionMessage {
-                            role: chat_completion::MessageRole::user,
-                            content: chat_completion::Content::Text(message.clone()),
-                            name: author,
-                        }
-                    ],
-                );
-
-                let result = self.client.chat_completion(req)?;
-                let content = result.choices[0].message.content.clone();
-                msg.channel_id.say(&ctx.http, content.unwrap()).await?;
+            Err(e) => match e.kind() {
+                clap::error::ErrorKind::DisplayHelp => {
+                    return Err(e.into());
+                }
+                _ => {
+                    self.handle_chat_command(ctx, msg, args[1..].join("").as_str(), author)
+                        .await?;
+                }
             },
-            Commands::Init { description } => {
+            Ok(Commands::Chat { message }) => {
+                self.handle_chat_command(ctx, msg, &message, author).await?;
+            }
+            Ok(Commands::Init { description }) => {
                 *self.description.lock().unwrap() = description;
                 msg.channel_id.say(&ctx.http, "Ok.").await?;
-            },
-            Commands::Image { description, model } => {
+            }
+            Ok(Commands::Image { description, model }) => {
                 let model_val = model.unwrap_or(ImageModel::Dalle2).api_value();
                 // let quality_val = quality.unwrap_or(ImageQuality::Standard).api_value();
                 // let style_val = style.unwrap_or(ImageStyle::Vivid).api_value();
@@ -173,9 +200,12 @@ impl DiscordHandler for Handler {
                 let image_bytes = reqwest::get(image_url).await?.bytes().await?;
 
                 let attachment = CreateAttachment::bytes(image_bytes, "generated_image.png");
-                let builder = CreateMessage::new().content(format!("Generated image ({})", &model_val));
+                let builder =
+                    CreateMessage::new().content(format!("Generated image ({})", &model_val));
 
-                msg.channel_id.send_files(&ctx.http, [attachment], builder).await?;
+                msg.channel_id
+                    .send_files(&ctx.http, [attachment], builder)
+                    .await?;
             }
         }
 
