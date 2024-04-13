@@ -6,7 +6,7 @@ use clap::{Parser, ValueEnum};
 use discord::{Discord, DiscordHandler};
 use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
-use openai_api_rs::v1::common::GPT4;
+use openai_api_rs::v1::common::{GPT4, GPT4_VISION_PREVIEW};
 use openai_api_rs::v1::image::ImageGenerationRequest;
 use serenity::all::{Context, CreateAttachment, CreateMessage, Message};
 use serenity::async_trait;
@@ -32,6 +32,10 @@ enum Commands {
 
         // #[clap(long = "style")]
         // style: Option<ImageStyle>,
+    },
+    Vision {
+        link: String,
+        question: String,
     },
 }
 
@@ -206,6 +210,33 @@ impl DiscordHandler for Handler {
                 msg.channel_id
                     .send_files(&ctx.http, [attachment], builder)
                     .await?;
+            }
+            Ok(Commands::Vision { link, question }) => {
+                let req = ChatCompletionRequest::new(
+                    GPT4_VISION_PREVIEW.to_string(),
+                    vec![chat_completion::ChatCompletionMessage {
+                        role: chat_completion::MessageRole::user,
+                        content: chat_completion::Content::ImageUrl(vec![
+                            chat_completion::ImageUrl {
+                                r#type: chat_completion::ContentType::text,
+                                text: Some(question.clone()),
+                                image_url: None,
+                            },
+                            chat_completion::ImageUrl {
+                                r#type: chat_completion::ContentType::image_url,
+                                text: None,
+                                image_url: Some(chat_completion::ImageUrlType {
+                                    url: link.clone(),
+                                }),
+                            },
+                        ]),
+                        name: author,
+                    }],
+                );
+
+                let result = self.client.chat_completion(req)?;
+                let content = result.choices[0].message.content.clone();
+                msg.channel_id.say(&ctx.http, content.unwrap()).await?;
             }
         }
 
