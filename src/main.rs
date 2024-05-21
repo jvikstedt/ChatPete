@@ -6,7 +6,7 @@ use clap::{Parser, ValueEnum};
 use discord::{Discord, DiscordHandler};
 use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
-use openai_api_rs::v1::common::{GPT4_O, GPT4_VISION_PREVIEW};
+use openai_api_rs::v1::common::GPT4_O;
 use openai_api_rs::v1::image::ImageGenerationRequest;
 use serenity::all::{Context, CreateAttachment, CreateMessage, Message};
 use serenity::async_trait;
@@ -213,7 +213,7 @@ impl DiscordHandler for Handler {
             }
             Ok(Commands::Vision { link, question }) => {
                 let req = ChatCompletionRequest::new(
-                    GPT4_VISION_PREVIEW.to_string(),
+                    GPT4_O.to_string(),
                     vec![chat_completion::ChatCompletionMessage {
                         role: chat_completion::MessageRole::user,
                         content: chat_completion::Content::ImageUrl(vec![
