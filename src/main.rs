@@ -8,7 +8,9 @@ use openai_api_rs::v1::api::Client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
 use openai_api_rs::v1::common::GPT4_O;
 use openai_api_rs::v1::image::ImageGenerationRequest;
-use serenity::all::{Context, CreateAttachment, CreateMessage, Message};
+use serenity::all::{
+    ChannelId, ChannelType, Context, CreateAttachment, CreateMessage, CreateThread, Message,
+};
 use serenity::async_trait;
 use unidecode::unidecode;
 
@@ -121,8 +123,8 @@ impl Handler {
     async fn handle_chat_command(
         &self,
         ctx: &Context,
-        msg: &Message,
         message: &str,
+        channel_id: &ChannelId,
         author: Option<String>,
     ) -> Result<()> {
         let req = ChatCompletionRequest::new(
@@ -145,7 +147,7 @@ impl Handler {
 
         let result = self.client.chat_completion(req)?;
         let content = result.choices[0].message.content.clone();
-        msg.channel_id.say(&ctx.http, content.unwrap()).await?;
+        channel_id.say(&ctx.http, content.unwrap()).await?;
         Ok(())
     }
 }
@@ -156,8 +158,32 @@ impl DiscordHandler for Handler {
         if !msg.mentions_me(&ctx.http).await? {
             return Ok(());
         }
+
         let args = shlex::split(&msg.content).unwrap();
         println!("{:?}", args);
+
+        let channel = msg.channel_id.to_channel(&ctx.http).await?.guild().unwrap();
+
+        let is_thread = matches!(
+            channel.kind,
+            ChannelType::PublicThread | ChannelType::PrivateThread
+        );
+        let content = args[1..].join(" ").as_str().to_string();
+        let thread_name: String = content.chars().take(50).collect();
+
+        let channel_id = if is_thread {
+            channel.id
+        } else {
+            ctx.http
+                .create_thread_from_message(
+                    msg.channel_id,
+                    msg.id,
+                    &CreateThread::new(&thread_name),
+                    None,
+                )
+                .await?
+                .id
+        };
 
         let command = Commands::try_parse_from(&args);
 
@@ -179,16 +205,17 @@ impl DiscordHandler for Handler {
                     return Err(e.into());
                 }
                 _ => {
-                    self.handle_chat_command(ctx, msg, args[1..].join("").as_str(), author)
+                    self.handle_chat_command(ctx, content.as_str(), &channel_id, author)
                         .await?;
                 }
             },
             Ok(Commands::Chat { message }) => {
-                self.handle_chat_command(ctx, msg, &message, author).await?;
+                self.handle_chat_command(ctx, &message, &channel_id, author)
+                    .await?;
             }
             Ok(Commands::Init { description }) => {
                 *self.description.lock().unwrap() = description;
-                msg.channel_id.say(&ctx.http, "Ok.").await?;
+                channel_id.say(&ctx.http, "Ok.").await?;
             }
             Ok(Commands::Image { description, model }) => {
                 let model_val = model.unwrap_or(ImageModel::Dalle2).api_value();
@@ -207,7 +234,7 @@ impl DiscordHandler for Handler {
                 let builder =
                     CreateMessage::new().content(format!("Generated image ({})", &model_val));
 
-                msg.channel_id
+                channel_id
                     .send_files(&ctx.http, [attachment], builder)
                     .await?;
             }
@@ -236,7 +263,7 @@ impl DiscordHandler for Handler {
 
                 let result = self.client.chat_completion(req)?;
                 let content = result.choices[0].message.content.clone();
-                msg.channel_id.say(&ctx.http, content.unwrap()).await?;
+                channel_id.say(&ctx.http, content.unwrap()).await?;
             }
         }
 
